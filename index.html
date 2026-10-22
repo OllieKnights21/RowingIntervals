@@ -1,0 +1,494 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Row interval builder</title>
+<style>
+:root{
+  --bg:#f6f6f3; --card:#ffffff; --text:#1b1d20; --muted:#6b7077; --line:#dcdcd6;
+  --accent:#1f6feb; --bad:#d1242f;
+  --blue:#4aa3ff; --green:#3ecf6e; --orange:#ffa94d; --red:#ff5a5f; --grey:#8a8f98;
+}
+@media (prefers-color-scheme: dark){
+  :root{ --bg:#101214; --card:#191c20; --text:#eceef0; --muted:#9aa0a8; --line:#2c3138; --accent:#5aa2ff; --bad:#ff7b72; }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:760px;margin:0 auto;padding:16px 14px 80px}
+h1{font-size:20px;font-weight:600;margin:6px 0 2px}
+h2{font-size:14px;font-weight:600;margin:0 0 8px;color:var(--muted);text-transform:none}
+p.sub{margin:0 0 16px;color:var(--muted);font-size:13px}
+section{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin:0 0 14px}
+label{font-size:12px;color:var(--muted);display:block;margin:0 0 3px}
+input,select,textarea,button{font:inherit;color:var(--text)}
+input,select,textarea{background:transparent;border:1px solid var(--line);border-radius:8px;padding:7px 9px;width:100%}
+input:focus,select:focus,textarea:focus{outline:2px solid var(--accent);outline-offset:-1px}
+input.bad{border-color:var(--bad);outline-color:var(--bad)}
+button{background:transparent;border:1px solid var(--line);border-radius:8px;padding:7px 12px;cursor:pointer}
+button:hover{border-color:var(--muted)}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+button.icon{padding:3px 8px;font-size:13px;min-width:32px}
+.row{display:flex;gap:10px;flex-wrap:wrap}
+.row>div{flex:1 1 120px;min-width:100px}
+.bar{display:flex;gap:2px;height:22px;margin:4px 0 8px}
+.bar div{border-radius:3px;min-width:4px}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:var(--muted)}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+.total{font-size:13px;color:var(--muted);margin:2px 0 8px}
+.card{border:1px solid var(--line);border-radius:10px;padding:10px;margin:0 0 8px;background:var(--card)}
+.card.over{border-color:var(--accent)}
+.group{border-left:4px solid var(--accent);background:transparent}
+.group>.card{margin-left:8px}
+.head{display:flex;align-items:center;gap:6px;margin:0 0 8px}
+.head .title{flex:1;font-size:13px;font-weight:600}
+.sw{width:12px;height:12px;border-radius:3px;display:inline-block;flex:none}
+.handle{cursor:grab;color:var(--muted);padding:0 4px;user-select:none;touch-action:none}
+.seg{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;margin:0 0 8px}
+.seg button{flex:1;border:0;border-radius:0;padding:6px 4px;font-size:13px}
+.seg button.on{background:var(--accent);color:#fff}
+.fields{display:flex;gap:10px;flex-wrap:wrap}
+.fields>div{flex:1 1 90px;min-width:80px}
+.actions{display:flex;gap:8px;flex-wrap:wrap;margin:6px 0 0}
+textarea{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;min-height:70px;resize:vertical}
+.note{font-size:12px;color:var(--muted);margin:6px 0 0}
+.err{font-size:13px;color:var(--bad);margin:6px 0 0;min-height:1em}
+</style>
+</head>
+<body>
+<main>
+  <h1>Row interval builder</h1>
+  <p class="sub">Build a session, copy the code, paste it into the watch app's settings in the Garmin Connect phone app. Everything runs in your browser; nothing is uploaded.</p>
+
+  <section>
+    <h2>Settings</h2>
+    <div class="row">
+      <div><label for="ftp">FTP pace (per 500m)</label><input id="ftp" inputmode="numeric" placeholder="2:09"></div>
+      <div><label for="tol">Pace band (± seconds)</label><input id="tol" type="number" min="1" max="30" step="1"></div>
+      <div><label for="tpl">Start from a template</label><select id="tpl"></select></div>
+    </div>
+    <p class="note">Step colours come from pace against your FTP (blue easy, green steady, orange hard, red very hard). Heart rate steps are coloured by zone.</p>
+  </section>
+
+  <section>
+    <h2>Timeline preview</h2>
+    <div class="bar" id="bar"></div>
+    <div class="total" id="total"></div>
+    <div class="legend">
+      <span><i style="background:var(--blue)"></i>Under 75% FTP / zones 1–2</span>
+      <span><i style="background:var(--green)"></i>75–90% / zone 3</span>
+      <span><i style="background:var(--orange)"></i>90–105% / zone 4</span>
+      <span><i style="background:var(--red)"></i>Over 105% / zone 5</span>
+      <span><i style="background:var(--grey)"></i>Free</span>
+    </div>
+  </section>
+
+  <section>
+    <h2>Steps</h2>
+    <div id="list"></div>
+    <div class="actions">
+      <button id="addStep">+ Step</button>
+      <button id="addSet">+ Set (work and rest, repeated)</button>
+    </div>
+    <p class="note">Drag the handle to reorder, or use the arrows. Steps inside a set repeat together.</p>
+  </section>
+
+  <section>
+    <h2>Code for the watch</h2>
+    <textarea id="code" readonly spellcheck="false"></textarea>
+    <div class="actions">
+      <button class="primary" id="copy">Copy code</button>
+      <span class="note" id="len" style="align-self:center"></span>
+    </div>
+    <p class="note" id="copied"></p>
+  </section>
+
+  <section>
+    <h2>Load a code</h2>
+    <textarea id="load" spellcheck="false" placeholder="Paste a code here to edit it"></textarea>
+    <div class="actions"><button id="loadBtn">Load</button></div>
+    <div class="err" id="loadErr"></div>
+  </section>
+</main>
+
+<script>
+//CORE-START
+var COL = {blue:'var(--blue)', green:'var(--green)', orange:'var(--orange)', red:'var(--red)', grey:'var(--grey)'};
+var LIMITS = {pace:[60,360], spm:[10,60], time:[5,7200], dist:[50,50000], reps:[1,50], tol:[1,30]};
+
+function pad2(n){ return n < 10 ? '0' + n : '' + n; }
+function fmtMS(s){ s = Math.round(s); return Math.floor(s/60) + ':' + pad2(s % 60); }
+function inRange(v, r){ return typeof v === 'number' && isFinite(v) && v >= r[0] && v <= r[1]; }
+
+function parseMS(str){
+  str = String(str).trim();
+  var v = null;
+  if (/^\d+:[0-5]\d$/.test(str)) { var p = str.split(':'); v = (+p[0]) * 60 + (+p[1]); }
+  else if (/^\d+$/.test(str)) { v = (+str) * 60; }
+  return inRange(v, LIMITS.time) ? v : null;
+}
+function parsePace(str){
+  str = String(str).trim();
+  var v = null;
+  if (/^\d:[0-5]\d$/.test(str)) { var p = str.split(':'); v = (+p[0]) * 60 + (+p[1]); }
+  else if (/^\d{2,3}$/.test(str)) { v = +str; }
+  return inRange(v, LIMITS.pace) ? v : null;
+}
+function pctFtp(pace, ftp){ return Math.pow(ftp / pace, 3) * 100; }
+
+function colourName(s, ftp){
+  if (s.mode === 'pace') {
+    var p = pctFtp(s.pace, ftp);
+    return p < 75 ? 'blue' : p < 90 ? 'green' : p < 105 ? 'orange' : 'red';
+  }
+  if (s.mode === 'hr') {
+    return s.hr <= 2 ? 'blue' : s.hr === 3 ? 'green' : s.hr === 4 ? 'orange' : 'red';
+  }
+  return 'grey';
+}
+
+function estSeconds(s, ftp){
+  if (s.durKind === 'time') return s.dur;
+  var pace = s.mode === 'pace' ? s.pace : ftp * 1.15;
+  return s.dur / 500 * pace;
+}
+
+function mkStep(o){
+  var d = {mode:'free', durKind:'time', dur:300, pace:129, spm:22, hr:3};
+  for (var k in o) d[k] = o[k];
+  return d;
+}
+
+function stepTok(s){
+  var t = (s.durKind === 'dist' ? 'm' : 't') + s.dur;
+  if (s.mode === 'pace') { t += ',p' + s.pace; if (s.spm) t += ',s' + s.spm; }
+  else if (s.mode === 'hr') { t += ',h' + s.hr; if (s.spm) t += ',s' + s.spm; }
+  return t;
+}
+
+function encode(st){
+  var toks = [];
+  st.items.forEach(function(it){
+    if (it.t === 'group') {
+      toks.push('[' + it.reps);
+      it.steps.forEach(function(s){ toks.push(stepTok(s)); });
+      toks.push(']');
+    } else toks.push(stepTok(it));
+  });
+  return 'v1,f' + st.ftp + ',b' + st.tol + '|' + toks.join(';');
+}
+
+function parseStepTok(tok){
+  var f = tok.split(',');
+  var m = /^([tm])(\d+)$/.exec(f[0]);
+  if (!m) throw new Error('Bad step "' + tok + '"');
+  var s = mkStep({durKind: m[1] === 'm' ? 'dist' : 'time', dur: +m[2], mode:'free', spm:0});
+  if (!inRange(s.dur, s.durKind === 'dist' ? LIMITS.dist : LIMITS.time)) throw new Error('Duration out of range in "' + tok + '"');
+  var hasP = false, hasH = false;
+  for (var i = 1; i < f.length; i++) {
+    var c = f[i].charAt(0), n = +f[i].slice(1);
+    if (!/^[phs]\d+$/.test(f[i])) throw new Error('Bad field "' + f[i] + '"');
+    if (c === 'p') { hasP = true; s.pace = n; if (!inRange(n, LIMITS.pace)) throw new Error('Pace out of range in "' + tok + '"'); }
+    if (c === 'h') { hasH = true; s.hr = n; if (n < 1 || n > 5) throw new Error('HR zone must be 1 to 5 in "' + tok + '"'); }
+    if (c === 's') { s.spm = n; if (n !== 0 && !inRange(n, LIMITS.spm)) throw new Error('Stroke rate out of range in "' + tok + '"'); }
+  }
+  if (hasP && hasH) throw new Error('A step can use pace or heart rate, not both ("' + tok + '")');
+  s.mode = hasP ? 'pace' : hasH ? 'hr' : 'free';
+  if (s.mode === 'free' && s.spm) throw new Error('Free steps cannot have a stroke rate ("' + tok + '")');
+  if (s.mode === 'free') s.spm = 22;
+  if (s.mode === 'hr' && !hasH) s.hr = 3;
+  if (s.mode !== 'pace') s.pace = 129;
+  return s;
+}
+
+function decode(code){
+  code = String(code).trim();
+  var halves = code.split('|');
+  if (halves.length !== 2) throw new Error('Not a valid code (missing "|")');
+  var h = halves[0].split(',');
+  if (h[0] !== 'v1') throw new Error('Unknown code version "' + h[0] + '"');
+  var ftp = null, tol = null;
+  h.slice(1).forEach(function(x){
+    if (/^f\d+$/.test(x)) ftp = +x.slice(1);
+    else if (/^b\d+$/.test(x)) tol = +x.slice(1);
+    else throw new Error('Bad header field "' + x + '"');
+  });
+  if (!inRange(ftp, LIMITS.pace)) throw new Error('FTP missing or out of range');
+  if (!inRange(tol, LIMITS.tol)) throw new Error('Pace band missing or out of range');
+  var toks = halves[1].split(';').filter(function(x){ return x !== ''; });
+  var items = [], grp = null;
+  toks.forEach(function(tok){
+    if (tok.charAt(0) === '[') {
+      if (grp) throw new Error('Sets cannot be nested');
+      var reps = +tok.slice(1);
+      if (!/^\[\d+$/.test(tok) || !inRange(reps, LIMITS.reps)) throw new Error('Bad repeat "' + tok + '"');
+      grp = {t:'group', reps: reps, steps: []};
+    } else if (tok === ']') {
+      if (!grp) throw new Error('Unexpected "]"');
+      if (!grp.steps.length) throw new Error('Empty set');
+      items.push(grp); grp = null;
+    } else {
+      var s = parseStepTok(tok); s.t = 'step';
+      if (grp) grp.steps.push(s); else items.push(s);
+    }
+  });
+  if (grp) throw new Error('Set not closed with "]"');
+  if (!items.length) throw new Error('No steps in code');
+  return {ftp: ftp, tol: tol, items: items};
+}
+
+function expand(items){
+  var out = [];
+  items.forEach(function(it){
+    if (it.t === 'group') { for (var r = 0; r < it.reps; r++) it.steps.forEach(function(s){ out.push(s); }); }
+    else out.push(it);
+  });
+  return out;
+}
+
+function describe(s){
+  var dur = s.durKind === 'dist' ? s.dur + ' m' : fmtMS(s.dur);
+  if (s.mode === 'pace') return dur + ' at ' + fmtMS(s.pace) + (s.spm ? ', ' + s.spm + ' spm' : '');
+  if (s.mode === 'hr') return dur + ' in zone ' + s.hr + (s.spm ? ', ' + s.spm + ' spm' : '');
+  return dur + ' free';
+}
+//CORE-END
+
+var state = null;
+var STORE = 'rowbuilder.v1';
+
+function tplStep(mode, durKind, dur, pace, spm, hr){ var o = mkStep({mode:mode, durKind:durKind, dur:dur, pace:pace, spm:spm, hr:hr}); o.t = 'step'; return o; }
+function free(dur){ return tplStep('free','time',dur,129,22,3); }
+function grp(reps, steps){ return {t:'group', reps:reps, steps:steps}; }
+
+var TEMPLATES = {
+  'Threshold 4 x 8 min': function(f){ return [free(600), grp(4,[tplStep('pace','time',480,f+2,24,3), free(120)]), free(300)]; },
+  'Steady state 3 x 20 min': function(f){ return [free(600), grp(3,[tplStep('pace','time',1200,f+10,20,3), free(180)]), free(300)]; },
+  'Short intervals 8 x 500 m': function(f){ return [free(600), grp(8,[tplStep('pace','dist',500,Math.max(61,f-6),28,3), free(90)]), free(300)]; },
+  'Zone 2 steady 40 min': function(f){ return [free(300), tplStep('hr','time',2400,129,20,2), free(300)]; },
+  'Blank': function(f){ return [free(300)]; }
+};
+
+function newState(tplName, ftp, tol){
+  return {ftp: ftp, tol: tol, items: TEMPLATES[tplName](ftp)};
+}
+
+function $(id){ return document.getElementById(id); }
+
+function getByPath(path){
+  var p = String(path).split('.');
+  var it = state.items[+p[0]];
+  return p.length === 1 ? it : it.steps[+p[1]];
+}
+function listFor(path){
+  var p = String(path).split('.');
+  return p.length === 1 ? state.items : state.items[+p[0]].steps;
+}
+function idxOf(path){ var p = String(path).split('.'); return +p[p.length - 1]; }
+
+function cardHTML(s, path, n){
+  var sw = '<span class="sw" data-sw="' + path + '"></span>';
+  var head = '<div class="head"><span class="handle" data-handle="1" title="Drag to reorder">&#8942;&#8942;</span>' + sw +
+    '<span class="title">Step ' + n + '</span>' +
+    '<button class="icon" data-act="up" title="Move up">&#8593;</button>' +
+    '<button class="icon" data-act="down" title="Move down">&#8595;</button>' +
+    '<button class="icon" data-act="dup" title="Duplicate">&#10064;</button>' +
+    '<button class="icon" data-act="del" title="Delete">&#10005;</button></div>';
+  var seg = '<div class="seg">' +
+    ['pace|Pace + SPM','hr|HR + SPM','free|Free'].map(function(x){
+      var a = x.split('|');
+      return '<button data-act="mode" data-mode="' + a[0] + '" class="' + (s.mode === a[0] ? 'on' : '') + '">' + a[1] + '</button>';
+    }).join('') + '</div>';
+  var durVal = s.durKind === 'dist' ? String(s.dur) : fmtMS(s.dur);
+  var fields = '<div class="fields">' +
+    '<div><label>Length by</label><select data-f="durKind"><option value="time"' + (s.durKind === 'time' ? ' selected' : '') + '>Time</option><option value="dist"' + (s.durKind === 'dist' ? ' selected' : '') + '>Distance (m)</option></select></div>' +
+    '<div><label>' + (s.durKind === 'dist' ? 'Metres' : 'Time (m:ss)') + '</label><input data-f="dur" inputmode="numeric" value="' + durVal + '"></div>';
+  if (s.mode === 'pace') fields += '<div><label>Pace /500m</label><input data-f="pace" inputmode="numeric" value="' + fmtMS(s.pace) + '"></div>';
+  if (s.mode === 'hr') fields += '<div><label>HR zone</label><select data-f="hr">' + [1,2,3,4,5].map(function(z){ return '<option value="' + z + '"' + (s.hr === z ? ' selected' : '') + '>Zone ' + z + '</option>'; }).join('') + '</select></div>';
+  if (s.mode !== 'free') fields += '<div><label>Stroke rate (0 = off)</label><input data-f="spm" inputmode="numeric" value="' + s.spm + '"></div>';
+  fields += '</div>';
+  return '<div class="card" data-path="' + path + '">' + head + seg + fields + '</div>';
+}
+
+function render(){
+  var html = '', n = 0;
+  state.items.forEach(function(it, i){
+    if (it.t === 'group') {
+      html += '<div class="card group" data-path="' + i + '"><div class="head"><span class="handle" data-handle="1" title="Drag to reorder">&#8942;&#8942;</span>' +
+        '<span class="title">Repeat</span>' +
+        '<div style="width:90px"><input data-f="reps" inputmode="numeric" value="' + it.reps + '" aria-label="Repeats"></div><span class="note" style="margin:0">times</span>' +
+        '<button class="icon" data-act="up" title="Move up">&#8593;</button>' +
+        '<button class="icon" data-act="down" title="Move down">&#8595;</button>' +
+        '<button class="icon" data-act="ungroup" title="Ungroup">&#8689;</button>' +
+        '<button class="icon" data-act="del" title="Delete set">&#10005;</button></div>';
+      it.steps.forEach(function(s, j){ n++; html += cardHTML(s, i + '.' + j, n); });
+      html += '<div class="actions"><button data-act="addin">+ Step in set</button></div></div>';
+    } else { n++; html += cardHTML(it, String(i), n); }
+  });
+  $('list').innerHTML = html;
+  updateOutputs();
+}
+
+function updateOutputs(){
+  var ftp = state.ftp;
+  document.querySelectorAll('[data-sw]').forEach(function(el){
+    el.style.background = COL[colourName(getByPath(el.getAttribute('data-sw')), ftp)];
+  });
+  var steps = expand(state.items), total = 0;
+  steps.forEach(function(s){ total += estSeconds(s, ftp); });
+  var bar = $('bar'); bar.innerHTML = '';
+  steps.forEach(function(s){
+    var d = document.createElement('div');
+    d.style.flex = String(Math.max(1, estSeconds(s, ftp))) + ' 1 0';
+    d.style.background = COL[colourName(s, ftp)];
+    d.title = describe(s);
+    bar.appendChild(d);
+  });
+  $('total').textContent = 'About ' + fmtMS(total) + ' in total, ' + steps.length + ' steps' + (s_has_dist(steps) ? ' (distance steps estimated from pace)' : '');
+  var code = encode(state);
+  $('code').value = code;
+  $('len').textContent = code.length + ' characters';
+  try { localStorage.setItem(STORE, JSON.stringify(state)); } catch (e) {}
+}
+function s_has_dist(steps){ return steps.some(function(s){ return s.durKind === 'dist'; }); }
+
+function defaultsFor(s, mode){
+  s.mode = mode;
+  if (mode === 'pace') { s.pace = inRange(s.pace, LIMITS.pace) && s.mode === 'pace' ? s.pace : state.ftp; if (!s.spm) s.spm = 22; }
+  if (mode === 'hr') { if (!s.hr) s.hr = 3; if (!s.spm) s.spm = 22; }
+}
+
+function onInput(e){
+  var el = e.target, f = el.getAttribute('data-f');
+  if (!f || el.tagName === 'SELECT') return;
+  var card = el.closest('[data-path]'); if (!card) return;
+  var obj = getByPath(card.getAttribute('data-path')), v = null;
+  if (f === 'dur') v = obj.durKind === 'dist' ? (/^\d+$/.test(el.value.trim()) && inRange(+el.value, LIMITS.dist) ? +el.value : null) : parseMS(el.value);
+  else if (f === 'pace') v = parsePace(el.value);
+  else if (f === 'spm') { var n = /^\d+$/.test(el.value.trim()) ? +el.value : NaN; v = (n === 0 || inRange(n, LIMITS.spm)) ? n : null; }
+  else if (f === 'reps') { var r = /^\d+$/.test(el.value.trim()) ? +el.value : NaN; v = inRange(r, LIMITS.reps) ? r : null; }
+  if (v === null) { el.classList.add('bad'); return; }
+  el.classList.remove('bad');
+  obj[f === 'dur' ? 'dur' : f] = v;
+  updateOutputs();
+}
+
+function onChange(e){
+  var el = e.target, f = el.getAttribute('data-f');
+  if (!f || el.tagName !== 'SELECT') return;
+  var obj = getByPath(el.closest('[data-path]').getAttribute('data-path'));
+  if (f === 'durKind') { obj.durKind = el.value; obj.dur = el.value === 'dist' ? 500 : 240; }
+  if (f === 'hr') obj.hr = +el.value;
+  render();
+}
+
+function onClick(e){
+  var b = e.target.closest('[data-act]'); if (!b) return;
+  var card = b.closest('[data-path]'); var path = card.getAttribute('data-path');
+  var act = b.getAttribute('data-act'), list = listFor(path), i = idxOf(path);
+  if (act === 'mode') { defaultsFor(getByPath(path), b.getAttribute('data-mode')); }
+  else if (act === 'up' && i > 0) { var t = list[i-1]; list[i-1] = list[i]; list[i] = t; }
+  else if (act === 'down' && i < list.length - 1) { var t2 = list[i+1]; list[i+1] = list[i]; list[i] = t2; }
+  else if (act === 'dup') { list.splice(i + 1, 0, JSON.parse(JSON.stringify(list[i]))); }
+  else if (act === 'del') { if (state.items.length === 1 && String(path).indexOf('.') < 0) return; list.splice(i, 1); if (String(path).indexOf('.') > 0 && !list.length) state.items.splice(+String(path).split('.')[0], 1); }
+  else if (act === 'ungroup') { var g = state.items[i]; Array.prototype.splice.apply(state.items, [i, 1].concat(g.steps)); }
+  else if (act === 'addin') { state.items[+path].steps.push(tplStep('free','time',120,129,22,3)); }
+  render();
+}
+
+var dragPath = null;
+function onPointerDown(e){
+  var h = e.target.closest('[data-handle]'); if (!h) return;
+  var card = h.closest('[data-path]'); card.setAttribute('draggable', 'true');
+}
+function onDragStart(e){
+  var card = e.target.closest ? e.target.closest('[data-path]') : null;
+  if (!card || card.getAttribute('draggable') !== 'true') return;
+  dragPath = card.getAttribute('data-path');
+  try { e.dataTransfer.setData('text/plain', dragPath); } catch (x) {}
+  e.stopPropagation();
+}
+function sameParent(a, b){
+  var pa = String(a).split('.'), pb = String(b).split('.');
+  if (pa.length !== pb.length) return false;
+  return pa.length === 1 || pa[0] === pb[0];
+}
+function onDragOver(e){
+  var card = e.target.closest ? e.target.closest('[data-path]') : null;
+  if (!card || dragPath === null) return;
+  var tp = card.getAttribute('data-path');
+  if (tp !== dragPath && sameParent(dragPath, tp)) { e.preventDefault(); card.classList.add('over'); }
+}
+function onDragLeave(e){ var c = e.target.closest ? e.target.closest('[data-path]') : null; if (c) c.classList.remove('over'); }
+function onDrop(e){
+  var card = e.target.closest ? e.target.closest('[data-path]') : null;
+  if (!card || dragPath === null) return;
+  var tp = card.getAttribute('data-path');
+  if (tp !== dragPath && sameParent(dragPath, tp)) {
+    e.preventDefault();
+    var list = listFor(dragPath), from = idxOf(dragPath), to = idxOf(tp);
+    var item = list.splice(from, 1)[0]; list.splice(to, 0, item);
+  }
+  dragPath = null; render();
+}
+function onDragEnd(){ dragPath = null; document.querySelectorAll('[draggable]').forEach(function(c){ c.removeAttribute('draggable'); c.classList.remove('over'); }); }
+
+function copyCode(){
+  var ta = $('code'); var msg = $('copied');
+  function ok(){ msg.textContent = 'Copied. Paste it into the app settings in Garmin Connect.'; }
+  function fallback(){ ta.removeAttribute('readonly'); ta.select(); try { document.execCommand('copy'); ok(); } catch (x) { msg.textContent = 'Select the code and copy it manually.'; } ta.setAttribute('readonly', ''); }
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(ta.value).then(ok, fallback); else fallback();
+}
+
+function init(){
+  var sel = $('tpl');
+  sel.innerHTML = '<option value="">Choose…</option>' + Object.keys(TEMPLATES).map(function(k){ return '<option>' + k + '</option>'; }).join('');
+  var saved = null;
+  try { saved = JSON.parse(localStorage.getItem(STORE)); } catch (e) {}
+  if (saved && saved.items && saved.items.length && inRange(saved.ftp, LIMITS.pace)) {
+    try { state = decode(encode(saved)); } catch (e) { state = null; }
+  }
+  if (!state) state = newState('Threshold 4 x 8 min', 129, 5);
+  $('ftp').value = fmtMS(state.ftp); $('tol').value = state.tol;
+
+  $('ftp').addEventListener('input', function(){
+    var v = parsePace($('ftp').value);
+    if (v === null) { $('ftp').classList.add('bad'); return; }
+    $('ftp').classList.remove('bad'); state.ftp = v; updateOutputs();
+  });
+  $('tol').addEventListener('input', function(){
+    var v = +$('tol').value;
+    if (!inRange(v, LIMITS.tol) || Math.floor(v) !== v) { $('tol').classList.add('bad'); return; }
+    $('tol').classList.remove('bad'); state.tol = v; updateOutputs();
+  });
+  sel.addEventListener('change', function(){
+    if (!sel.value) return;
+    state = newState(sel.value, state.ftp, state.tol); sel.value = ''; render();
+  });
+  $('addStep').addEventListener('click', function(){ state.items.push(tplStep('free','time',300,state.ftp,22,3)); render(); });
+  $('addSet').addEventListener('click', function(){
+    state.items.push(grp(4, [tplStep('pace','time',240,Math.max(61,state.ftp - 4),24,3), tplStep('free','time',120,state.ftp,22,3)])); render();
+  });
+  $('copy').addEventListener('click', copyCode);
+  $('loadBtn').addEventListener('click', function(){
+    try {
+      var s = decode($('load').value);
+      state = s; $('ftp').value = fmtMS(s.ftp); $('tol').value = s.tol; $('loadErr').textContent = ''; render();
+    } catch (err) { $('loadErr').textContent = err.message; }
+  });
+  var list = $('list');
+  list.addEventListener('input', onInput);
+  list.addEventListener('change', onChange);
+  list.addEventListener('click', onClick);
+  list.addEventListener('pointerdown', onPointerDown);
+  list.addEventListener('dragstart', onDragStart);
+  list.addEventListener('dragover', onDragOver);
+  list.addEventListener('dragleave', onDragLeave);
+  list.addEventListener('drop', onDrop);
+  list.addEventListener('dragend', onDragEnd);
+  render();
+}
+if (typeof document !== 'undefined' && document.getElementById('list')) init();
+</script>
+</body>
+</html>
